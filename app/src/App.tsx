@@ -27,8 +27,7 @@ type Alignment = {
   words: AlignedWord[];
 };
 
-const AUDIO_BASE_URL =
-  'https://raw.githubusercontent.com/benkaiser/bsb-plan-generator/master/audio_processed';
+const AUDIO_BASE_URL = `${import.meta.env.BASE_URL}audio`;
 
 type Translation = { id: string; name: string };
 
