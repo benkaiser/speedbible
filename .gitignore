@@ -1,0 +1,18 @@
+# Build output
+app/dist/
+app/node_modules/
+
+# Ruby script vendor (bundle install output)
+scripts/vendor/
+scripts/.bundle/
+
+# OS / editor
+.DS_Store
+*.swp
+*.log
+.vscode/
+.idea/
+
+# Local previews and test artifacts
+/tmp/
+*.tmp
