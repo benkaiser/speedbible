@@ -74,13 +74,20 @@ def build_alignment_text(book: str, chapter: int, verses: list[dict]):
     return full_text, verse_offsets, cursor
 
 
-def assemble_words(expected_tokens, verse_offsets, word_segments, audio_duration):
-    """Walk expected tokens; for each, take the next aligned timing if any.
+def _norm(w: str) -> str:
+    """Normalize a word for matching expected tokens to wav2vec2 segments."""
+    return WORD_RE.findall(w.replace("\u2019", "'").lower())[0] if WORD_RE.search(w.replace("\u2019", "'")) else ""
 
-    Critically we ALWAYS emit one entry per expected verse-token. If wav2vec2 ran
-    out of timings before the text did (which happens at chapter ends when the
-    audio has a fade or the model loses tracking), we interpolate the remaining
-    tokens linearly between the last known time and audio_duration.
+
+def assemble_words(expected_tokens, verse_offsets, word_segments, audio_duration):
+    """Walk expected tokens; match each to the next word_segment by text.
+
+    Critically we ALWAYS emit one entry per expected verse-token. If wav2vec2
+    drops some segments (which happens when the audio is unclear or at chapter
+    fades), we leave those tokens unmapped and fill them by linear interpolation
+    between adjacent known anchors. We match by the word text rather than by
+    position so that a missing segment in the middle doesn't shift every
+    subsequent token's timing — it just creates a single hole.
 
     Returns (out_words, preamble_end).
     """
@@ -90,18 +97,35 @@ def assemble_words(expected_tokens, verse_offsets, word_segments, audio_duration
                 return vnum
         return -1
 
-    # First pass: align each expected token to a (start, end) where possible,
-    # else mark as None for later interpolation.
+    # First pass: text-based alignment.
+    # For each segment in order, find the earliest unmatched expected token
+    # (at or after the current cursor) whose normalized text equals the
+    # segment's normalized text. Tokens between the cursor and the match are
+    # left as None (gaps to be interpolated). If no match within a small
+    # lookahead, the segment is dropped and the cursor stays put.
     timed = [None] * len(expected_tokens)
-    align_idx = 0
-    for ti in range(len(expected_tokens)):
-        # Find next word_segment with valid timings.
-        while align_idx < len(word_segments):
-            w = word_segments[align_idx]
-            align_idx += 1
-            if "start" in w and "end" in w:
-                timed[ti] = (float(w["start"]), float(w["end"]))
+    norm_expected = [_norm(t) for t in expected_tokens]
+    cursor = 0
+    LOOKAHEAD = 6  # how far ahead to scan for a text match
+    for w in word_segments:
+        if "start" not in w or "end" not in w:
+            continue
+        seg_word = _norm(w.get("word", ""))
+        if not seg_word:
+            continue
+        # Search for matching expected token at cursor..cursor+LOOKAHEAD.
+        match = -1
+        end_scan = min(cursor + LOOKAHEAD, len(expected_tokens))
+        for k in range(cursor, end_scan):
+            if timed[k] is None and norm_expected[k] == seg_word:
+                match = k
                 break
+        if match < 0:
+            # No nearby text match — drop this segment rather than
+            # mis-assigning it. Cursor unchanged.
+            continue
+        timed[match] = (float(w["start"]), float(w["end"]))
+        cursor = match + 1
 
     # Second pass: fill any None entries by linear interpolation between
     # adjacent known anchors. For tail Nones (no future anchor), extrapolate
