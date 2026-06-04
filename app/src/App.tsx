@@ -471,7 +471,12 @@ export default function App() {
               type="range" min={100} max={1000} step={10}
               value={wpm} onChange={(e) => setWpm(Number(e.target.value))}
             />
-            <span className="speed-value">{wpm} WPM</span>
+            <span className="speed-value">
+              {wpm} WPM
+              {audioActive && (
+                <span className="audio-rate">{` · ${(wpm / naturalWpm).toFixed(2)}× audio`}</span>
+              )}
+            </span>
           </div>
 
           <div className="actions">

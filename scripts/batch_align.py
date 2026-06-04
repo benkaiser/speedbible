@@ -94,8 +94,9 @@ def download_audio(audio_num: int) -> Path:
 
 def run_align(chapter_json_path: Path, audio_path: Path, out_path: Path,
               align_model, metadata, device: str):
-    # Re-uses the loaded model across chapters by importing the module's helpers.
-    from align_chapter import build_alignment_text, load_chapter, tokenize_for_align
+    from align_chapter import (
+        assemble_words, build_alignment_text, load_chapter, tokenize_for_align,
+    )
 
     book, chapter, verses = load_chapter(chapter_json_path)
     full_text, verse_offsets, total_tokens = build_alignment_text(book, chapter, verses)
@@ -108,47 +109,22 @@ def run_align(chapter_json_path: Path, audio_path: Path, out_path: Path,
         align_model, metadata, audio, device, return_char_alignments=False,
     )
     word_segments = result.get("word_segments") or []
-
     expected_tokens = tokenize_for_align(full_text)
 
-    def vnum_for(i):
-        for vnum, lo, hi in verse_offsets:
-            if lo <= i < hi:
-                return vnum
-        return -1
-
-    out_words = []
-    preamble_end = None
-    align_idx = 0
-    for ti, tok in enumerate(expected_tokens):
-        vnum = vnum_for(ti)
-        if align_idx >= len(word_segments):
-            break
-        w = word_segments[align_idx]
-        if "start" not in w or "end" not in w:
-            align_idx += 1
-            continue
-        if vnum >= 1:
-            if preamble_end is None:
-                preamble_end = float(w["start"])
-            out_words.append({
-                "w": tok,
-                "s": round(float(w["start"]), 3),
-                "e": round(float(w["end"]), 3),
-                "v": vnum,
-            })
-        align_idx += 1
+    out_words, preamble_end = assemble_words(
+        expected_tokens, verse_offsets, word_segments, audio_duration
+    )
 
     out = {
         "book": book, "chapter": chapter,
         "audio_duration": round(audio_duration, 3),
-        "preamble_end": round(preamble_end or 0.0, 3),
+        "preamble_end": round(preamble_end, 3),
         "audio_number": int(audio_path.stem),
         "words": out_words,
     }
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(out, separators=(",", ":")))
-    return len(out_words), out["preamble_end"], audio_duration
+    return len(out_words), out["preamble_end"], audio_duration, len(word_segments), total_tokens
 
 
 def main():
@@ -185,8 +161,14 @@ def main():
         print(f"[{done+1}/{len(targets)}] {s} {c} (audio {audio_num})", file=sys.stderr)
         try:
             audio = download_audio(audio_num)
-            n_words, p_end, dur = run_align(chap_json, audio, out_path, align_model, metadata, args.device)
-            print(f"  → {n_words} words, preamble {p_end:.2f}s, dur {dur:.1f}s", file=sys.stderr)
+            n_words, p_end, dur, n_segs, n_expected = run_align(
+                chap_json, audio, out_path, align_model, metadata, args.device
+            )
+            print(
+                f"  → {n_words} words emitted ({n_segs} aligned segs / {n_expected} expected tokens), "
+                f"preamble {p_end:.2f}s, dur {dur:.1f}s",
+                file=sys.stderr,
+            )
             done += 1
         except Exception as e:
             print(f"  FAILED: {e}", file=sys.stderr)

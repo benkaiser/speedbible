@@ -278,3 +278,7 @@ header .header-right { display: flex; align-items: center; gap: 0.5rem; }
 .audio-toggle.is-on {
   background: var(--red); border-color: var(--red); color: white;
 }
+
+.audio-rate {
+  color: var(--red); font-weight: 600; margin-left: 0.15rem;
+}
