@@ -462,7 +462,13 @@ export default function App() {
                 if (t !== undefined) audioRef.current.currentTime = t;
               }
             }}
-            onSeekStart={() => setPlaying(false)}
+            onSeekStart={() => {
+              // In audio mode the rAF loop keeps the displayed word in sync
+              // with audio.currentTime, which we update on every drag move,
+              // so we can keep playing while seeking. In RSVP-only mode the
+              // timer would race the drag, so pause then.
+              if (!audioActive) setPlaying(false);
+            }}
           />
 
           <div className="speed-row">
