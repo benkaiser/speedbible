@@ -6,6 +6,11 @@ app/node_modules/
 scripts/vendor/
 scripts/.bundle/
 
+# Python venv for forced alignment
+scripts/align-venv/
+scripts/__pycache__/
+*.pyc
+
 # OS / editor
 .DS_Store
 *.swp

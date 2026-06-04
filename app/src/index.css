@@ -267,3 +267,14 @@ header .header-right { display: flex; align-items: center; gap: 0.5rem; }
   .picker-body { grid-template-columns: 1fr; }
   .picker-books { max-height: 40vh; border-right: none; border-bottom: 1px solid var(--border); }
 }
+
+/* Audio mode toggle in header */
+.audio-toggle {
+  background: var(--bg-3); color: var(--text);
+  border: 1px solid var(--border); border-radius: 999px;
+  padding: 0.35rem 0.7rem; font-size: 0.85rem;
+}
+.audio-toggle:hover { background: var(--bg-hover); }
+.audio-toggle.is-on {
+  background: var(--red); border-color: var(--red); color: white;
+}

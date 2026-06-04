@@ -20,6 +20,41 @@ Normal reading is bottlenecked by eye movement (~200ms per saccade). RSVP shows 
 - ☀️ / 🌙 Light and dark themes (respects `prefers-color-scheme`)
 - ⏯️ Resumes where you left off (localStorage)
 
+## Audio mode (synced narration)
+
+For BSB chapters, SpeedBible can sync RSVP word-flashing with the public-domain
+[Hays narration](https://github.com/benkaiser/bsb-plan-generator) using forced alignment.
+When audio is enabled, the `<audio>` element drives the word index via
+`audio.currentTime`, and `audio.playbackRate` is set to `wpm / natural_wpm` so the
+narrator speeds up to match your RSVP rate.
+
+Browsers preserve pitch up to ~3-4× (≈ 600 WPM); above that the audio gets choppy
+and you may want to turn it off. There's no soft cap — your call.
+
+### Generating alignment data
+
+```sh
+cd scripts
+python3.12 -m venv align-venv
+source align-venv/bin/activate
+pip install whisperx
+
+# One chapter:
+python batch_align.py john:3
+
+# All 1189 chapters (takes hours on CPU, much faster on GPU):
+python batch_align.py --all
+```
+
+Outputs land in `app/public/bible-static/bsb-align/<book-slug>/<chapter>.json`,
+each ≈ 25-40 KB. Audio MP3s themselves are streamed at runtime from
+`bsb-plan-generator/audio_processed/`, not bundled in this repo.
+
+The aligner uses [WhisperX](https://github.com/m-bain/whisperX)'s wav2vec2 forced
+alignment. Each chapter's audio starts with a `"<Book> <chapter>"` preamble, which
+the script prepends to the alignment text and then trims from the output, recording
+the preamble end time so the player can skip past it.
+
 ## Stack
 
 - React 19 + TypeScript + Vite

@@ -17,6 +17,19 @@ type ChapterResponse = {
   translation_note: string;
 };
 
+type AlignedWord = { w: string; s: number; e: number; v: number };
+type Alignment = {
+  book: string;
+  chapter: number;
+  audio_duration: number;
+  preamble_end: number;
+  audio_number: number;
+  words: AlignedWord[];
+};
+
+const AUDIO_BASE_URL =
+  'https://raw.githubusercontent.com/benkaiser/bsb-plan-generator/master/audio_processed';
+
 type Translation = { id: string; name: string };
 
 const TRANSLATIONS: Translation[] = [
@@ -86,6 +99,18 @@ async function fetchChapter(translation: string, book: string, chapter: number):
   return res.json();
 }
 
+async function fetchAlignment(book: string, chapter: number): Promise<Alignment | null> {
+  const slug = bookSlug(book);
+  const url = `${import.meta.env.BASE_URL}bible-static/bsb-align/${slug}/${chapter}.json`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
 const STORAGE_KEY = 'rsvpBibleBSB';
 type Persisted = { book: string; chapter: number; translation: string; wpm: number; };
 function loadState(): Partial<Persisted> {
@@ -129,6 +154,9 @@ export default function App() {
   const [verses, setVerses] = useState<Verse[]>([]);
   const [words, setWords] = useState<string[]>([]);
   const [verseMap, setVerseMap] = useState<number[]>([]);
+  const [wordTimings, setWordTimings] = useState<AlignedWord[] | null>(null);
+  const [alignment, setAlignment] = useState<Alignment | null>(null);
+  const [audioEnabled, setAudioEnabled] = useState(false);
   const [wordIndex, setWordIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -137,6 +165,20 @@ export default function App() {
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const timerRef = useRef<number | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const rafRef = useRef<number | null>(null);
+
+  // Audio mode is only meaningful for BSB chapters that have alignment data.
+  const audioAvailable = translation === 'bsb' && alignment !== null;
+  const audioActive = audioEnabled && audioAvailable;
+
+  // Natural narration WPM, derived from alignment.
+  const naturalWpm = useMemo(() => {
+    if (!alignment) return 165;
+    const speakingDur = alignment.audio_duration - alignment.preamble_end;
+    if (speakingDur <= 0) return 165;
+    return (alignment.words.length / speakingDur) * 60;
+  }, [alignment]);
 
   useEffect(() => {
     const t = window.setTimeout(() => {
@@ -151,20 +193,37 @@ export default function App() {
     setError(null);
     setPlaying(false);
     setWordIndex(0);
-    fetchChapter(translation, book, chapter)
-      .then((data) => {
+    setAlignment(null);
+    setWordTimings(null);
+
+    const chapterPromise = fetchChapter(translation, book, chapter);
+    const alignPromise = translation === 'bsb' ? fetchAlignment(book, chapter) : Promise.resolve(null);
+
+    Promise.all([chapterPromise, alignPromise])
+      .then(([data, align]) => {
         if (cancelled) return;
         setVerses(data.verses);
-        const allWords: string[] = [];
-        const map: number[] = [];
-        for (const v of data.verses) {
-          for (const w of splitWords(v.text)) {
-            allWords.push(w);
-            map.push(v.verse);
+        if (align) setAlignment(align);
+
+        // If audio mode is enabled and we have alignment, source words from alignment
+        // (so wordTimings line up 1:1 with words). Otherwise tokenize verses normally.
+        if (align && audioEnabled) {
+          setWords(align.words.map((w) => w.w));
+          setVerseMap(align.words.map((w) => w.v));
+          setWordTimings(align.words);
+        } else {
+          const allWords: string[] = [];
+          const map: number[] = [];
+          for (const v of data.verses) {
+            for (const w of splitWords(v.text)) {
+              allWords.push(w);
+              map.push(v.verse);
+            }
           }
+          setWords(allWords);
+          setVerseMap(map);
+          setWordTimings(null);
         }
-        setWords(allWords);
-        setVerseMap(map);
       })
       .catch((e: unknown) => {
         if (cancelled) return;
@@ -175,7 +234,35 @@ export default function App() {
     return () => { cancelled = true; };
   }, [translation, book, chapter]);
 
+  // When the user toggles audio mode (without reloading chapter), rebuild the
+  // word stream from either alignment or splitWords on the already-loaded verses.
   useEffect(() => {
+    if (verses.length === 0) return;
+    if (audioEnabled && alignment) {
+      setWords(alignment.words.map((w) => w.w));
+      setVerseMap(alignment.words.map((w) => w.v));
+      setWordTimings(alignment.words);
+      setWordIndex(0);
+    } else {
+      const allWords: string[] = [];
+      const map: number[] = [];
+      for (const v of verses) {
+        for (const w of splitWords(v.text)) {
+          allWords.push(w);
+          map.push(v.verse);
+        }
+      }
+      setWords(allWords);
+      setVerseMap(map);
+      setWordTimings(null);
+      setWordIndex(0);
+    }
+    setPlaying(false);
+  }, [audioEnabled, alignment]);
+
+  // Default RSVP timer — disabled in audio mode (audio drives the index instead).
+  useEffect(() => {
+    if (audioActive) return;
     if (!playing || words.length === 0) return;
     if (wordIndex >= words.length) { setPlaying(false); return; }
     const interval = 60000 / wpm;
@@ -183,7 +270,53 @@ export default function App() {
       setWordIndex((i) => i + 1);
     }, interval);
     return () => { if (timerRef.current) window.clearTimeout(timerRef.current); };
-  }, [playing, wordIndex, wpm, words.length]);
+  }, [playing, wordIndex, wpm, words.length, audioActive]);
+
+  // Audio mode: keep audio.playbackRate in sync with WPM.
+  useEffect(() => {
+    if (!audioActive || !audioRef.current) return;
+    const rate = wpm / naturalWpm;
+    audioRef.current.playbackRate = Math.max(0.25, Math.min(rate, 16));
+  }, [wpm, audioActive, naturalWpm]);
+
+  // Audio mode: rAF loop maps audio.currentTime → wordIndex.
+  useEffect(() => {
+    if (!audioActive || !wordTimings) return;
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const tick = () => {
+      const t = audio.currentTime;
+      // Binary search for the last word whose start <= t.
+      let lo = 0, hi = wordTimings.length - 1, best = 0;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (wordTimings[mid].s <= t) { best = mid; lo = mid + 1; } else { hi = mid - 1; }
+      }
+      setWordIndex(best);
+      rafRef.current = requestAnimationFrame(tick);
+    };
+
+    if (playing) {
+      rafRef.current = requestAnimationFrame(tick);
+    }
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+  }, [audioActive, wordTimings, playing]);
+
+  // Audio mode: play/pause the <audio> element when state changes.
+  useEffect(() => {
+    if (!audioActive || !audioRef.current) return;
+    const audio = audioRef.current;
+    if (playing) {
+      // If we're at the start, seek past the preamble.
+      if (alignment && audio.currentTime < alignment.preamble_end - 0.1) {
+        audio.currentTime = alignment.preamble_end;
+      }
+      audio.play().catch(() => { /* ignore autoplay rejections */ });
+    } else {
+      audio.pause();
+    }
+  }, [playing, audioActive, alignment]);
 
   const safeIndex = Math.min(wordIndex, Math.max(0, words.length - 1));
   const currentWord = words[safeIndex] ?? '';
@@ -233,6 +366,16 @@ export default function App() {
         </div>
         <div className="header-right">
           <span className="muted small">{translation.toUpperCase()}</span>
+          {audioAvailable && (
+            <button
+              className={'audio-toggle' + (audioEnabled ? ' is-on' : '')}
+              aria-pressed={audioEnabled}
+              title={audioEnabled ? 'Disable audio (use RSVP timing)' : 'Enable audio (synced narration)'}
+              onClick={() => setAudioEnabled((a) => !a)}
+            >
+              {audioEnabled ? '🔊 Audio' : '🔈 Audio'}
+            </button>
+          )}
           <button
             className="theme-toggle"
             aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
@@ -243,6 +386,19 @@ export default function App() {
           </button>
         </div>
       </header>
+
+      {audioActive && alignment && (
+        <audio
+          ref={audioRef}
+          src={`${AUDIO_BASE_URL}/${alignment.audio_number}.mp3`}
+          preload="auto"
+          onEnded={() => setPlaying(false)}
+          onLoadedMetadata={(e) => {
+            const a = e.currentTarget as HTMLAudioElement & { preservesPitch?: boolean };
+            a.preservesPitch = true;
+          }}
+        />
+      )}
 
       <div className="controls">
         <label className="field">
@@ -299,7 +455,13 @@ export default function App() {
             verseMap={verseMap}
             book={book}
             chapter={chapter}
-            onSeek={(i) => { setWordIndex(i); }}
+            onSeek={(i) => {
+              setWordIndex(i);
+              if (audioActive && wordTimings && audioRef.current) {
+                const t = wordTimings[i]?.s;
+                if (t !== undefined) audioRef.current.currentTime = t;
+              }
+            }}
             onSeekStart={() => setPlaying(false)}
           />
 
@@ -315,7 +477,13 @@ export default function App() {
           <div className="actions">
             <button
               className="circ"
-              onClick={() => { setWordIndex(0); setPlaying(false); }}
+              onClick={() => {
+                setWordIndex(0);
+                setPlaying(false);
+                if (audioActive && audioRef.current && alignment) {
+                  audioRef.current.currentTime = alignment.preamble_end;
+                }
+              }}
               disabled={loading}
               title="Restart chapter"
               aria-label="Restart chapter"
@@ -325,7 +493,12 @@ export default function App() {
               className="play"
               disabled={loading || words.length === 0}
               onClick={() => {
-                if (finished) setWordIndex(0);
+                if (finished) {
+                  setWordIndex(0);
+                  if (audioActive && audioRef.current && alignment) {
+                    audioRef.current.currentTime = alignment.preamble_end;
+                  }
+                }
                 setPlaying((p) => !p);
               }}
               aria-label={playing ? 'Pause' : 'Play'}
@@ -362,7 +535,13 @@ export default function App() {
                 className="reader-verse"
                 onClick={() => {
                   const idx = verseMap.indexOf(v.verse);
-                  if (idx >= 0) setWordIndex(idx);
+                  if (idx >= 0) {
+                    setWordIndex(idx);
+                    if (audioActive && wordTimings && audioRef.current) {
+                      const t = wordTimings[idx]?.s;
+                      if (t !== undefined) audioRef.current.currentTime = t;
+                    }
+                  }
                   setPlaying(false);
                   setShowReader(false);
                 }}
