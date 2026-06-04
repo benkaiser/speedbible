@@ -27,9 +27,9 @@ import whisperx
 ROOT = Path(__file__).resolve().parent.parent
 STATIC_DIR = ROOT / "app" / "public" / "bible-static" / "bsb"
 ALIGN_DIR = ROOT / "app" / "public" / "bible-static" / "bsb-align"
-AUDIO_CACHE = Path("/tmp/sb-audio")
+AUDIO_CACHE = Path(__file__).resolve().parent.parent / "app" / "public" / "audio"
 AUDIO_CACHE.mkdir(parents=True, exist_ok=True)
-AUDIO_BASE = "https://raw.githubusercontent.com/benkaiser/bsb-plan-generator/master/audio_processed"
+AUDIO_BASE = "https://benkaiser.github.io/bsb-plan-generator/audio_processed"
 
 # Mirrors src/bibleData.tsx in benkaiser/bsb-plan-generator
 BIBLE = [
