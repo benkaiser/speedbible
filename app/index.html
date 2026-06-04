@@ -9,6 +9,23 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet" />
+    <script>
+      // SPA redirect decoder (paired with public/404.html). When GitHub Pages
+      // serves 404.html for a deep link, that page replaces the URL with
+      // ?/path=...&... — the snippet below converts it back to a real path
+      // before React boots, so window.location.pathname is correct.
+      (function () {
+        var l = window.location;
+        if (l.search.indexOf('?/') === 0 || l.search.indexOf('&/') !== -1) {
+          var q = l.search.slice(1).split('&').map(function (p) {
+            return p.replace(/~and~/g, '&');
+          });
+          var route = q.shift().slice(1); // drop leading '/'
+          var rest = q.length ? '?' + q.join('&') : '';
+          window.history.replaceState(null, '', l.pathname.replace(/\/$/, '') + '/' + route + rest + l.hash);
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

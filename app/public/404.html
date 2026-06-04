@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>SpeedBible</title>
+    <script>
+      // Single-Page-App redirect for GitHub Pages.
+      // Captures the requested path, encodes it into a query string, and
+      // sends the user to index.html. The boot snippet in index.html then
+      // decodes it back to a real path via history.replaceState, so the
+      // SPA router (App.tsx) sees the original URL.
+      //
+      // pathSegmentsToKeep = number of leading path segments that belong to
+      // the GitHub Pages base (e.g. /speedbible/ → 1, custom domain → 0).
+      // We auto-detect by reading <base href> set at build time.
+      (function () {
+        var pathSegmentsToKeep = 1; // /speedbible/
+        // If running on a custom apex/subdomain (e.g. speedbible.com), drop to 0.
+        if (location.hostname.indexOf('github.io') === -1) pathSegmentsToKeep = 0;
+
+        var l = location;
+        l.replace(
+          l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '') +
+          l.pathname.split('/').slice(0, 1 + pathSegmentsToKeep).join('/') + '/?/' +
+          l.pathname.slice(1).split('/').slice(pathSegmentsToKeep).join('/').replace(/&/g, '~and~') +
+          (l.search ? '&' + l.search.slice(1).replace(/&/g, '~and~') : '') +
+          l.hash
+        );
+      })();
+    </script>
+  </head>
+  <body></body>
+</html>

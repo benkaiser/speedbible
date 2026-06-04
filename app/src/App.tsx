@@ -138,11 +138,35 @@ function loadTheme(): 'dark' | 'light' {
   return 'dark';
 }
 
+// URL routing. Pathname after BASE_URL is `<book-slug>/<chapter>`, e.g.
+// `/speedbible/john/3` or `/john/3` on a custom domain. Returns null if the
+// URL doesn't match a chapter.
+function parseRoute(): { book: string; chapter: number } | null {
+  const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+  let path = window.location.pathname;
+  if (base && path.startsWith(base)) path = path.slice(base.length);
+  const m = path.replace(/^\/+|\/+$/g, '').split('/');
+  if (m.length < 2) return null;
+  const slug = m[0].toLowerCase();
+  const chap = parseInt(m[1], 10);
+  if (!slug || !Number.isFinite(chap) || chap < 1) return null;
+  const book = PROTESTANT_BOOKS.find((b) => bookSlug(b.name) === slug);
+  if (!book) return null;
+  if (chap > book.chapters) return null;
+  return { book: book.name, chapter: chap };
+}
+
+function buildRoute(book: string, chapter: number): string {
+  const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+  return `${base}/${bookSlug(book)}/${chapter}`;
+}
+
 export default function App() {
   const initial = loadState();
+  const route = parseRoute();
   const [translation, setTranslation] = useState(initial.translation ?? 'bsb');
-  const [book, setBook] = useState(initial.book ?? 'John');
-  const [chapter, setChapter] = useState<number>(initial.chapter ?? 3);
+  const [book, setBook] = useState(route?.book ?? initial.book ?? 'John');
+  const [chapter, setChapter] = useState<number>(route?.chapter ?? initial.chapter ?? 3);
   const [wpm, setWpm] = useState<number>(initial.wpm ?? 300);
   const [theme, setTheme] = useState<'dark' | 'light'>(loadTheme);
 
@@ -150,6 +174,27 @@ export default function App() {
     document.documentElement.setAttribute('data-theme', theme);
     try { localStorage.setItem('rsvpBibleTheme', theme); } catch { /* ignore */ }
   }, [theme]);
+
+  // Keep the URL in sync with book/chapter so links are shareable.
+  useEffect(() => {
+    const target = buildRoute(book, chapter);
+    if (window.location.pathname !== target) {
+      window.history.replaceState(null, '', target + window.location.search + window.location.hash);
+    }
+  }, [book, chapter]);
+
+  // Handle browser back/forward.
+  useEffect(() => {
+    const onPop = () => {
+      const r = parseRoute();
+      if (r) {
+        setBook(r.book);
+        setChapter(r.chapter);
+      }
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
 
   const [verses, setVerses] = useState<Verse[]>([]);
   const [words, setWords] = useState<string[]>([]);
