@@ -432,10 +432,14 @@ export default function App() {
       </header>
 
       {audioActive && alignment && (
+        // preload="none" is critical for offline support: each MP3 is ~1 MB
+        // and the full BSB narration is 1.2 GB, so we never preload audio. The
+        // service worker's CacheFirst rule lazy-caches each chapter the first
+        // time it's actually played, after which it's available offline.
         <audio
           ref={audioRef}
           src={`${AUDIO_BASE_URL}/${alignment.audio_number}.mp3`}
-          preload="auto"
+          preload="none"
           onEnded={() => setPlaying(false)}
           onLoadedMetadata={(e) => {
             const a = e.currentTarget as HTMLAudioElement & { preservesPitch?: boolean };
