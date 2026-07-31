@@ -170,15 +170,15 @@ header .header-right { display: flex; align-items: center; gap: 0.5rem; }
 
 .reader { font-family: 'Inter', system-ui, sans-serif; font-size: 1.1rem; line-height: 1.7; padding: 1rem 0; }
 .reader sup { font-size: 0.7rem; color: var(--muted-2); padding-right: 0.2rem; }
-.reader-verse {
-  cursor: pointer; border-radius: 0.3rem; padding: 0.05rem 0.25rem;
+.reader-word {
+  cursor: pointer; border-radius: 0.3rem; padding: 0.05rem 0.15rem;
   transition: background 80ms ease, box-shadow 80ms ease;
 }
-.reader-verse:hover {
+.reader-word:hover {
   background: var(--reader-hover-bg);
   box-shadow: inset 0 0 0 1px var(--reader-hover-ring);
 }
-.reader-verse:hover sup { color: var(--red); font-weight: 700; }
+.reader-word.is-current { color: var(--red); font-weight: 700; }
 
 .footer-note { text-align: center; margin-top: 2rem; }
 
