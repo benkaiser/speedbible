@@ -16,7 +16,7 @@ Normal reading is bottlenecked by eye movement (~200ms per saccade). RSVP shows 
 - 🎯 Column-locked ORP highlighting in red (Spritz-style)
 - 🎚️ Adjustable WPM slider (100–1500)
 - 🎬 Seek bar with verse tooltip and time-remaining estimate
-- 📑 Reader View — click any verse to jump to it in RSVP mode
+- 📑 Reader View — the word being read is highlighted in red and kept in view, playback controls stay available, and tapping any word seeks playback to it
 - 🔍 Searchable book picker (type a book name or filter live)
 - ☀️ / 🌙 Light and dark themes (respects `prefers-color-scheme`)
 - ⏯️ Resumes where you left off (localStorage)

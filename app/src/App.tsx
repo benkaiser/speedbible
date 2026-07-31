@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 
 type Verse = {
   book_id: string;
@@ -211,6 +211,7 @@ export default function App() {
   const timerRef = useRef<number | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const rafRef = useRef<number | null>(null);
+  const currentWordRef = useRef<HTMLSpanElement | null>(null);
 
   // Audio mode is only meaningful for BSB chapters that have alignment data.
   const audioAvailable = translation === 'bsb' && alignment !== null;
@@ -397,6 +398,145 @@ export default function App() {
   const ctxBefore = words.slice(Math.max(0, safeIndex - 4), safeIndex);
   const ctxAfter = words.slice(safeIndex + 1, safeIndex + 5);
 
+  // ----- Reader view <-> playback index mapping -----
+  // The reader renders the verse text as-written (punctuation intact), while the
+  // playback stream may come from the alignment data, whose tokenisation differs
+  // slightly. Map between them proportionally within each verse.
+  const verseRanges = useMemo(() => {
+    const ranges = new Map<number, { start: number; len: number }>();
+    for (let i = 0; i < verseMap.length; i++) {
+      const r = ranges.get(verseMap[i]);
+      if (r) r.len++;
+      else ranges.set(verseMap[i], { start: i, len: 1 });
+    }
+    return ranges;
+  }, [verseMap]);
+
+  const readerVerses = useMemo(
+    () => verses.map((v) => ({ verse: v.verse, tokens: splitWords(v.text) })),
+    [verses]
+  );
+
+  function wordIndexForToken(verse: number, tokenIdx: number, tokenCount: number): number | null {
+    const r = verseRanges.get(verse);
+    if (!r) return null;
+    if (tokenCount <= 0) return r.start;
+    const offset = Math.floor((tokenIdx * r.len) / tokenCount);
+    return r.start + Math.min(r.len - 1, offset);
+  }
+
+  // Which reader token (verse + token index) the current playback word maps to.
+  const currentToken = useMemo(() => {
+    const verse = verseMap[safeIndex];
+    if (verse === undefined) return null;
+    const r = verseRanges.get(verse);
+    const rv = readerVerses.find((x) => x.verse === verse);
+    if (!r || !rv || rv.tokens.length === 0 || r.len === 0) return null;
+    const offset = safeIndex - r.start;
+    const idx = Math.min(rv.tokens.length - 1, Math.floor((offset * rv.tokens.length) / r.len));
+    return { verse, token: idx };
+  }, [safeIndex, verseMap, verseRanges, readerVerses]);
+
+  function seekToWord(i: number) {
+    setWordIndex(i);
+    if (audioActive && wordTimings && audioRef.current) {
+      const t = wordTimings[i]?.s;
+      if (t !== undefined) audioRef.current.currentTime = t;
+    }
+  }
+
+  // Keep the highlighted reader word visible while playing.
+  useEffect(() => {
+    if (!showReader) return;
+    const el = currentWordRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    if (rect.top < 0 || rect.bottom > window.innerHeight) {
+      el.scrollIntoView({ block: 'center' });
+    }
+  }, [showReader, currentToken]);
+
+  const playbackControls = (
+    <>
+      <SeekBar
+        wordIndex={wordIndex}
+        totalWords={words.length}
+        verseMap={verseMap}
+        book={book}
+        chapter={chapter}
+        onSeek={seekToWord}
+        onSeekStart={() => {
+          // In audio mode the rAF loop keeps the displayed word in sync
+          // with audio.currentTime, which we update on every drag move,
+          // so we can keep playing while seeking. In RSVP-only mode the
+          // timer would race the drag, so pause then.
+          if (!audioActive) setPlaying(false);
+        }}
+      />
+
+      <div className="speed-row">
+        <span className="muted small">Speed</span>
+        <input
+          type="range" min={100} max={1000} step={10}
+          value={wpm} onChange={(e) => setWpm(Number(e.target.value))}
+        />
+        <span className="speed-value">
+          {wpm} WPM
+          {audioActive && (
+            <span className="audio-rate">{` · ${(wpm / naturalWpm).toFixed(2)}× audio`}</span>
+          )}
+        </span>
+      </div>
+
+      <div className="actions">
+        <button
+          className="circ"
+          onClick={() => {
+            setWordIndex(0);
+            setPlaying(false);
+            if (audioActive && audioRef.current && alignment) {
+              audioRef.current.currentTime = alignment.preamble_end;
+            }
+          }}
+          disabled={loading}
+          title="Restart chapter"
+          aria-label="Restart chapter"
+        >↺</button>
+
+        <button
+          className="play"
+          disabled={loading || words.length === 0}
+          onClick={() => {
+            if (finished) {
+              setWordIndex(0);
+              if (audioActive && audioRef.current && alignment) {
+                audioRef.current.currentTime = alignment.preamble_end;
+              }
+            }
+            setPlaying((p) => !p);
+          }}
+          aria-label={playing ? 'Pause' : 'Play'}
+        >
+          {playing ? '❚❚' : '▶'}
+        </button>
+
+        <button
+          className="circ"
+          onClick={goNextChapter}
+          disabled={loading || !hasNextChapter}
+          title="Next chapter"
+          aria-label="Next chapter"
+        >
+          <span className="next-ch">Next<br/>Ch</span>
+        </button>
+      </div>
+
+      <div className="stats">
+        {Math.round(percent)}% &nbsp;·&nbsp; {wpm} WPM &nbsp;·&nbsp; {wordsLeft} words left &nbsp;·&nbsp; {formatDuration(secondsLeft)} remaining
+      </div>
+    </>
+  );
+
   return (
     <>
       <header>
@@ -497,88 +637,7 @@ export default function App() {
             )}
           </div>
 
-          <SeekBar
-            wordIndex={wordIndex}
-            totalWords={words.length}
-            verseMap={verseMap}
-            book={book}
-            chapter={chapter}
-            onSeek={(i) => {
-              setWordIndex(i);
-              if (audioActive && wordTimings && audioRef.current) {
-                const t = wordTimings[i]?.s;
-                if (t !== undefined) audioRef.current.currentTime = t;
-              }
-            }}
-            onSeekStart={() => {
-              // In audio mode the rAF loop keeps the displayed word in sync
-              // with audio.currentTime, which we update on every drag move,
-              // so we can keep playing while seeking. In RSVP-only mode the
-              // timer would race the drag, so pause then.
-              if (!audioActive) setPlaying(false);
-            }}
-          />
-
-          <div className="speed-row">
-            <span className="muted small">Speed</span>
-            <input
-              type="range" min={100} max={1000} step={10}
-              value={wpm} onChange={(e) => setWpm(Number(e.target.value))}
-            />
-            <span className="speed-value">
-              {wpm} WPM
-              {audioActive && (
-                <span className="audio-rate">{` · ${(wpm / naturalWpm).toFixed(2)}× audio`}</span>
-              )}
-            </span>
-          </div>
-
-          <div className="actions">
-            <button
-              className="circ"
-              onClick={() => {
-                setWordIndex(0);
-                setPlaying(false);
-                if (audioActive && audioRef.current && alignment) {
-                  audioRef.current.currentTime = alignment.preamble_end;
-                }
-              }}
-              disabled={loading}
-              title="Restart chapter"
-              aria-label="Restart chapter"
-            >↺</button>
-
-            <button
-              className="play"
-              disabled={loading || words.length === 0}
-              onClick={() => {
-                if (finished) {
-                  setWordIndex(0);
-                  if (audioActive && audioRef.current && alignment) {
-                    audioRef.current.currentTime = alignment.preamble_end;
-                  }
-                }
-                setPlaying((p) => !p);
-              }}
-              aria-label={playing ? 'Pause' : 'Play'}
-            >
-              {playing ? '❚❚' : '▶'}
-            </button>
-
-            <button
-              className="circ"
-              onClick={goNextChapter}
-              disabled={loading || !hasNextChapter}
-              title="Next chapter"
-              aria-label="Next chapter"
-            >
-              <span className="next-ch">Next<br/>Ch</span>
-            </button>
-          </div>
-
-          <div className="stats">
-            {Math.round(percent)}% &nbsp;·&nbsp; {wpm} WPM &nbsp;·&nbsp; {wordsLeft} words left &nbsp;·&nbsp; {formatDuration(secondsLeft)} remaining
-          </div>
+          {playbackControls}
 
           <div className="actions secondary">
             <button onClick={() => setShowReader(true)}>Reader View</button>
@@ -588,28 +647,33 @@ export default function App() {
         <>
           <div className="reader">
             {verses.length === 0 && !loading && <p className="muted">No verses.</p>}
-            {verses.map((v) => (
-              <span
-                key={v.verse}
-                className="reader-verse"
-                onClick={() => {
-                  const idx = verseMap.indexOf(v.verse);
-                  if (idx >= 0) {
-                    setWordIndex(idx);
-                    if (audioActive && wordTimings && audioRef.current) {
-                      const t = wordTimings[idx]?.s;
-                      if (t !== undefined) audioRef.current.currentTime = t;
-                    }
-                  }
-                  setPlaying(false);
-                  setShowReader(false);
-                }}
-                title={`Jump to ${book} ${chapter}:${v.verse} in RSVP view`}
-              >
-                <sup>{v.verse}</sup>{v.text.trim()}{' '}
+            {readerVerses.map((v) => (
+              <span key={v.verse} className="reader-verse">
+                <sup>{v.verse}</sup>
+                {v.tokens.map((token, i) => {
+                  const isCurrent = currentToken?.verse === v.verse && currentToken.token === i;
+                  return (
+                    <Fragment key={i}>
+                      <span
+                        ref={isCurrent ? currentWordRef : undefined}
+                        className={'reader-word' + (isCurrent ? ' is-current' : '')}
+                        onClick={() => {
+                          const idx = wordIndexForToken(v.verse, i, v.tokens.length);
+                          if (idx !== null) seekToWord(idx);
+                        }}
+                        title={`Jump to ${book} ${chapter}:${v.verse}`}
+                      >
+                        {token}
+                      </span>{' '}
+                    </Fragment>
+                  );
+                })}
               </span>
             ))}
           </div>
+
+          {playbackControls}
+
           <div className="actions secondary">
             <button onClick={() => setShowReader(false)}>RSVP View</button>
           </div>
